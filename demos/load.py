@@ -4,6 +4,7 @@
 
 from demos.scenario import CHUNKS, GRAPH
 from eval.graphdoc_io import deserialize_graph_docs
+from graphrag import vectorstore
 from graphrag.config import load_config
 from graphrag.ingestion.pipeline import _documents_from_chunks
 from graphrag.ingestion.writer import (
@@ -12,6 +13,7 @@ from graphrag.ingestion.writer import (
     write_chunks,
     write_graph_tenant,
 )
+from graphrag.providers import get_embeddings
 
 TENANT = "demo"
 
@@ -34,14 +36,6 @@ def main():
     r = graph.query("MATCH (:__Entity__ {tenant: $t})-[x]->(:__Entity__ {tenant: $t}) "
                     "RETURN count(x) AS n", {"t": TENANT})[0]["n"]
     print(f"[demos] loaded {len(rows)} chunks, {n} entities, {r} relationships under '{TENANT}'")
-
-
-if __name__ == "__main__":
-    main()
-
-
-from graphrag import vectorstore
-from graphrag.providers import get_embeddings
 
 
 def vectors_ready() -> bool:
@@ -75,3 +69,7 @@ def build_vectors() -> int:
         client.close()
     print(f"[demos] built vector index: {n} chunks under '{TENANT}'")
     return n
+
+
+if __name__ == "__main__":
+    main()

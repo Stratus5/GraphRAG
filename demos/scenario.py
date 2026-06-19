@@ -115,6 +115,25 @@ for vc, port in VC.items():
     text = f"{vc} is a venture capital firm. It holds stakes in {holdings}."
     _add(slug(vc), slug(vc) + ".txt", text, [_n(vc)] + [_n(c) for c in port], [])
 
+# Distractor chunks: high lexical overlap with the questions (so they compete for
+# vector top-k) but carry NO new relationships, so graph/curated answers are unchanged.
+# They re-mention existing entities only.
+_DISTRACTORS = [
+    ("distractor_market", "market_report.txt",
+     "This industry market report discusses founders, chief executive officers and "
+     "chief technology officers across many companies and the venture capital firms "
+     "that hold stakes in them. It mentions Ada Whitfield, Northwind Capital and "
+     "Vantage Payments in passing without stating any specific role or stake.",
+     ["Ada Whitfield", "Northwind Capital", "Vantage Payments"]),
+    ("distractor_press", "press_roundup.txt",
+     "A press roundup covering company founders, CEOs, CTOs and investors. It name-drops "
+     "Maya Chen, Summit Ventures and Helix Robotics in a general overview of the sector, "
+     "with no founding, role, or investment relationship asserted.",
+     ["Maya Chen", "Summit Ventures", "Helix Robotics"]),
+]
+for _cid, _src, _text, _ents in _DISTRACTORS:
+    _add(_cid, _src, _text, [_n(e) for e in _ents], [])
+
 
 def read_steps():
     steps = []

@@ -31,3 +31,25 @@ def neo4j_available():
         driver.close()
     except Exception:
         pytest.skip("Neo4j not available")
+
+
+@pytest.fixture
+def weaviate_available():
+    """Skip unless a live Weaviate is reachable; yield a connected client, then close it."""
+    import os
+    try:
+        import weaviate
+    except ImportError:
+        pytest.skip("weaviate-client not installed")
+    host = os.environ.get("WEAVIATE_HOST", "localhost")
+    port = int(os.environ.get("WEAVIATE_PORT", "8080"))
+    grpc = int(os.environ.get("WEAVIATE_GRPC_PORT", "50051"))
+    try:
+        client = weaviate.connect_to_local(host=host, port=port, grpc_port=grpc)
+        if not client.is_ready():
+            client.close()
+            pytest.skip("Weaviate not ready")
+    except Exception:
+        pytest.skip("Weaviate not available")
+    yield client
+    client.close()

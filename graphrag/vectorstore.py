@@ -40,3 +40,48 @@ def ensure_collection(client: weaviate.WeaviateClient) -> None:
             Property(name="tenant", data_type=DataType.TEXT),
         ],
     )
+
+
+def build_index(client: weaviate.WeaviateClient, embeddings: Embeddings,
+                chunks: list[dict], tenant: str) -> int:
+    """Embed and upsert chunks for `tenant`. Deterministic uuid -> re-runs upsert
+    (idempotent), matching the graph side's MERGE semantics."""
+    if not chunks:
+        return 0
+    ensure_collection(client)
+    vectors = embeddings.embed_documents([c["text"] for c in chunks])
+    coll = client.collections.get(COLLECTION)
+    with coll.batch.dynamic() as batch:
+        for c, vec in zip(chunks, vectors):
+            batch.add_object(
+                properties={
+                    "chunk_id": c["chunk_id"],
+                    "text": c["text"],
+                    "source": c.get("source", "unknown"),
+                    "tenant": tenant,
+                },
+                uuid=generate_uuid5(f"{tenant}:{c['chunk_id']}"),
+                vector=vec,
+            )
+    return len(chunks)
+
+
+def search(client: weaviate.WeaviateClient, embeddings: Embeddings,
+           question: str, k: int, tenant: str) -> list[dict]:
+    """Vector search within `tenant`; returns [{chunk_id, text, source, score}]."""
+    coll = client.collections.get(COLLECTION)
+    res = coll.query.near_vector(
+        near_vector=embeddings.embed_query(question),
+        limit=k,
+        filters=Filter.by_property("tenant").equal(tenant),
+        return_metadata=MetadataQuery(distance=True),
+    )
+    return [
+        {
+            "chunk_id": o.properties["chunk_id"],
+            "text": o.properties["text"],
+            "source": o.properties["source"],
+            "score": 1.0 - (o.metadata.distance or 0.0),
+        }
+        for o in res.objects
+    ]

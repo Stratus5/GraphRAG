@@ -1,0 +1,19 @@
+llm:
+  provider: openai
+  model: fc:openai/gpt-4o-mini
+embeddings:
+  provider: openai
+  model: fc:openai/text-embedding-3-small
+chunking:
+  size: 1000
+  overlap: 200
+# Leave lists empty for generic auto-derive mode.
+# Fill them in for domain mode, e.g. allowed_nodes: [Person, Company].
+schema:
+  allowed_nodes: [Person, Company, City]
+  allowed_relationships: [FOUNDED, ACQUIRED, CTO_OF, HEADQUARTERED_IN]
+expander:
+  max_degree: 50          # don't expand through entities above this degree
+  candidate_limit: 500    # deterministic fact budget before rerank
+  top_n: 10               # facts kept after rerank
+  rerank_model: BAAI/bge-reranker-base

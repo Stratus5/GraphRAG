@@ -1,0 +1,4 @@
+Maria Garcia is a robotics engineer specializing in autonomous navigation
+systems. At Acme Corp she leads the autonomy division and holds the role of
+Chief Technology Officer. She previously spent several years researching
+sensor fusion and motion planning for warehouse equipment.

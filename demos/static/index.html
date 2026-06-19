@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GraphRAG demos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">GRAPH<b>RAG</b></div>
+      <div class="tag">facts, connected across documents</div>
+      <nav class="tabs">
+        <button class="tab active" data-tab="read">Read</button>
+        <button class="tab" data-tab="ask">Ask</button>
+        <button class="tab" data-tab="explore">Explore</button>
+      </nav>
+    </header>
+
+    <div class="stage">
+      <aside id="panel"><!-- filled per tab --></aside>
+      <div>
+        <div id="cy"></div>
+        <div class="hint" id="hint"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

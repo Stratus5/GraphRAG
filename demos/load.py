@@ -38,3 +38,40 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+from graphrag import vectorstore
+from graphrag.providers import get_embeddings
+
+
+def vectors_ready() -> bool:
+    """True if the demo tenant has any vectors in Weaviate (and Weaviate is reachable)."""
+    try:
+        client = vectorstore.connect()
+    except Exception:
+        return False
+    try:
+        if not client.collections.exists(vectorstore.COLLECTION):
+            return False
+        hits = vectorstore.search(client, get_embeddings(load_config("config.yaml")),
+                                  "ready check", k=1, tenant=TENANT)
+        return bool(hits)
+    except Exception:
+        return False
+    finally:
+        client.close()
+
+
+def build_vectors() -> int:
+    """Embed scenario chunks into Weaviate under tenant 'demo'. Needs the gateway
+    (OPENAI_BASE_URL/OPENAI_API_KEY). Returns count written (0 if it can't build)."""
+    cfg = load_config("config.yaml")
+    rows = [{"chunk_id": c["chunk_id"], "text": c["text"], "source": c["source"]}
+            for c in CHUNKS]
+    client = vectorstore.connect()
+    try:
+        n = vectorstore.build_index(client, get_embeddings(cfg), rows, TENANT)
+    finally:
+        client.close()
+    print(f"[demos] built vector index: {n} chunks under '{TENANT}'")
+    return n

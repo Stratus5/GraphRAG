@@ -56,6 +56,20 @@ const load = (url, body) =>
 const getFull = async () => (fullGraph ||= await load("/api/graph"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+let currentMode = "curated";
+document.querySelectorAll('input[name="mode"]').forEach(el =>
+  el.addEventListener("change", e => { currentMode = e.target.value; }));
+
+(async () => {
+  const { live_available } = await load("/api/modes");
+  if (!live_available) {
+    const liveRadio = document.querySelector('input[value="live"]');
+    liveRadio.disabled = true;
+    document.getElementById("live-note").textContent =
+      " (set OPENAI_BASE_URL/OPENAI_API_KEY + start Weaviate to enable)";
+  }
+})();
+
 function elesFrom(g) {
   return [
     ...g.nodes.map((n) => ({ data: { id: n.id, label: n.id, type: n.type } })),
@@ -173,7 +187,8 @@ async function showAsk() {
     ${legend()}
     <div class="facts" id="qlist"></div>
     <div class="readout" id="ro2"></div>
-    <div class="facts" id="facts"></div>`;
+    <div class="facts" id="facts"></div>
+    <div id="answer"></div>`;
   const ql = $("#qlist");
   qs.forEach((q) => {
     const b = document.createElement("button");
@@ -186,7 +201,11 @@ async function showAsk() {
 async function ask(id, btn) {
   document.querySelectorAll(".qbtn").forEach((x) => x.style.opacity = .5);
   if (btn) btn.style.opacity = 1;
-  const res = await load("/api/ask", { id });
+  const data = await load("/api/ask", { id, mode: currentMode });
+  if (data.mode === "live") renderLive(data); else renderCurated(data);
+}
+
+function renderCurated(res) {
   cy.elements().removeClass("hidden dim lit answer focus");
   let lit = cy.collection();
   res.facts.forEach((f) => {
@@ -208,6 +227,30 @@ async function ask(id, btn) {
     const obj = f.pct == null ? f.object : `${f.object} (${f.pct}%)`;
     return `<div class="fact" style="animation-delay:${i * 45}ms"><span class="s">${f.subject}</span><span class="p">${f.predicate}</span><span class="o">${obj}</span></div>`;
   }).join("");
+  const ans = $("#answer"); if (ans) ans.innerHTML = "";
+}
+
+function renderLive(data) {
+  cy.elements().removeClass("hidden dim lit answer focus");
+  cy.elements().addClass("dim");
+  const hitText = data.vector_hits.map(h => h.text.toLowerCase()).join(" ");
+  const facts = data.facts.map(f => {
+    // a fact is "graph-only" if neither endpoint's name appears in the retrieved chunks
+    const inVectors = hitText.includes((f.subject || "").toLowerCase()) &&
+                      hitText.includes((f.object || "").toLowerCase());
+    return { ...f, graphOnly: !inVectors };
+  });
+  const hitsHtml = data.vector_hits.length
+    ? data.vector_hits.map(h => `<li>${h.source} <em>(${h.score.toFixed(2)})</em></li>`).join("")
+    : "<li>(no chunks)</li>";
+  const factsHtml = facts.map(f =>
+    `<li class="${f.graphOnly ? "graph-only" : ""}">${f.subject} <b>${f.predicate}</b> ${f.object}` +
+    `${f.graphOnly ? ' <span class="badge">graph-only</span>' : ""}</li>`).join("");
+  $("#ro2").innerHTML = `<b>${data.vector_hits.length}</b> vector hits, <b>${facts.length}</b> graph facts`;
+  $("#facts").innerHTML = "";
+  document.getElementById("answer").innerHTML =
+    `<h4>Vector search returned (k=${data.vector_hits.length})</h4><ul>${hitsHtml}</ul>` +
+    `<h4>Facts after graph expansion</h4><ul class="facts">${factsHtml}</ul>`;
 }
 
 // ---- demo 3: Explore ---------------------------------------------------

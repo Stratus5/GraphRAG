@@ -132,3 +132,9 @@ button.act:disabled { opacity: .4; cursor: default; box-shadow: none; }
   padding: 7px 11px; border-radius: 2px;
 }
 .stage > div { position: relative; min-width: 0; }
+
+#mode-bar { margin: 8px 0; font-size: 14px; }
+#mode-bar label { margin-right: 12px; }
+#live-note { color: #999; font-size: 12px; }
+.facts .graph-only { font-weight: 600; }
+.badge { background: #2a7; color: #fff; border-radius: 4px; padding: 0 6px; font-size: 11px; }

@@ -14,7 +14,8 @@ from graphrag.ingestion.writer import (
     write_chunks,
     write_graph_tenant,
 )
-from graphrag.providers import get_chat_model
+from graphrag import vectorstore
+from graphrag.providers import get_chat_model, get_embeddings
 
 Progress = Callable[[str, int, int], None] | None
 
@@ -117,4 +118,21 @@ def ingest(cfg: Config, folder: Path | str, tenant: str = "default",
 
     stats = _ingest_documents(cfg, chunks, tenant, on_progress)
     stats["documents"] = len(docs)
+
+    # CLI/eval entrypoint only: also build the Weaviate vector index so `graphrag query`
+    # works end-to-end. The shared core (_ingest_documents / ingest_chunks, used by the
+    # graph-only service) never does this — keeps the service-path invariant intact.
+    rows = [
+        {"chunk_id": c.metadata["chunk_id"], "text": c.page_content,
+         "source": c.metadata.get("source", "unknown")}
+        for c in chunks
+    ]
+    p("Building vector index", 0, 0)
+    client = vectorstore.connect()
+    try:
+        vectorstore.build_index(client, get_embeddings(cfg), rows, tenant)
+    finally:
+        client.close()
+    p("Building vector index", len(rows), len(rows))
+
     return stats

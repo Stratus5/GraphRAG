@@ -1,6 +1,6 @@
 services:
   neo4j:
-    image: neo4j:5.23
+    image: neo4j:5.26
     container_name: graphrag-neo4j
     ports:
       - "127.0.0.1:7474:7474"   # browser

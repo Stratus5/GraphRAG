@@ -11,9 +11,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from demos import scenario
-from demos.load import main as load_demo_graph
+from demos.load import build_vectors, main as load_demo_graph, vectors_ready
+from graphrag import vectorstore
 from graphrag.config import load_config
 from graphrag.ingestion.writer import get_graph
+from graphrag.providers import get_embeddings
+from graphrag.retrieval.service import retrieve as service_retrieve
 
 TENANT = "demo"
 STATIC = Path(__file__).parent / "static"
@@ -25,6 +28,17 @@ graph = get_graph(cfg)
 if not graph.query("MATCH (e:__Entity__ {tenant: $t}) RETURN 1 AS x LIMIT 1", {"t": TENANT}):
     load_demo_graph()
 _Q = {q["id"]: q for q in scenario.QUESTIONS}
+
+LIVE_K = 2  # small k so aggregation/multi-hop questions can't be answered by vectors alone
+
+# Build the demo vector index once if the gateway is configured and it's empty.
+_LIVE_AVAILABLE = False
+try:
+    if not vectors_ready():
+        build_vectors()
+    _LIVE_AVAILABLE = vectors_ready()
+except Exception:
+    _LIVE_AVAILABLE = False
 
 app = FastAPI(title="graphrag demos")
 
@@ -115,12 +129,42 @@ QUERIES = {
 
 class Ask(BaseModel):
     id: str
+    mode: str = "curated"
+
+
+@app.get("/api/modes")
+def api_modes():
+    return {"live_available": _LIVE_AVAILABLE}
+
+
+def _curated(a_id: str) -> dict:
+    q = _Q[a_id]
+    rows = graph.query(QUERIES[a_id], {"t": TENANT})
+    facts = [{"subject": r["subject"], "predicate": r["predicate"],
+              "object": r["object"], "pct": r["pct"]} for r in rows]
+    return {"mode": "curated", "question": q["question"], "facts": facts,
+            "answer": q["answer"], "sources": []}
+
+
+def _live(a_id: str) -> dict:
+    q = _Q[a_id]
+    cfg = load_config("config.yaml")
+    client = vectorstore.connect()
+    try:
+        hits = vectorstore.search(client, get_embeddings(cfg), q["question"],
+                                  k=LIVE_K, tenant=TENANT)
+    finally:
+        client.close()
+    chunk_ids = [h["chunk_id"] for h in hits]
+    facts = service_retrieve(graph, TENANT, chunk_ids, hops=2,
+                             max_degree=cfg.expander.max_degree,
+                             candidate_limit=cfg.expander.candidate_limit,
+                             question=q["question"], top_n=cfg.expander.top_n,
+                             rerank_model=cfg.expander.rerank_model)
+    return {"mode": "live", "question": q["question"], "vector_hits": hits,
+            "facts": facts, "answer": q["answer"]}
 
 
 @app.post("/api/ask")
 def api_ask(a: Ask):
-    q = _Q[a.id]
-    rows = graph.query(QUERIES[a.id], {"t": TENANT})
-    facts = [{"subject": r["subject"], "predicate": r["predicate"], "object": r["object"],
-              "pct": r["pct"]} for r in rows]
-    return {"question": q["question"], "facts": facts, "answer": q["answer"], "sources": []}
+    return _live(a.id) if a.mode == "live" else _curated(a.id)

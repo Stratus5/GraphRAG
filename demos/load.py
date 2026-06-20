@@ -37,6 +37,11 @@ def main():
                     "RETURN count(x) AS n", {"t": TENANT})[0]["n"]
     print(f"[demos] loaded {len(rows)} chunks, {n} entities, {r} relationships under '{TENANT}'")
 
+    try:
+        build_vectors()
+    except Exception as e:
+        print(f"[demos] vector build skipped: {e}")
+
 
 def vectors_ready() -> bool:
     """True if the demo tenant has any vectors in Weaviate (and Weaviate is reachable)."""

@@ -1,29 +1,19 @@
 #!/usr/bin/env bash
-# Start the GraphRAG demos (local, loopback, no gateway needed).
+# Start the GraphRAG demo: stores (Neo4j + Weaviate) then the containerized demo app.
 #   ./demos/start.sh   ->  http://127.0.0.1:8800
 set -euo pipefail
-
 cd "$(dirname "$0")/.."   # repo root
 
-PORT="${PORT:-8800}"
-VENV="${VENV:-.venv}"
-PY="$VENV/bin/python"
-[ -x "$PY" ] || PY="python3"
-
-# 1. Neo4j (loopback container) must be up.
-if command -v podman >/dev/null 2>&1; then
-  podman start graphrag-neo4j >/dev/null 2>&1 || true
+if [ ! -f .env ]; then
+  echo "WARN: no .env — Live mode needs OPENAI_BASE_URL/OPENAI_API_KEY; Curated still works." >&2
 fi
 
-# 2. Load env (Neo4j creds).
-if [ -f .env ]; then set -a; . ./.env; set +a; fi
+echo "==> Bringing up stores (Neo4j + Weaviate) ..."
+docker compose up -d
 
-# 3. Load the demo graph (replays the frozen extraction, no LLM/gateway).
-"$PY" -m demos.load
+echo "==> Building + starting the demo app ..."
+docker compose -f demos/docker-compose.yml up -d --build
 
-# 4. Serve the single-page app.
 echo
-echo "  GraphRAG demos -> http://127.0.0.1:${PORT}"
-echo "  (Ctrl-C to stop)"
-echo
-exec "$PY" -m uvicorn demos.server:app --host 127.0.0.1 --port "$PORT"
+echo "  GraphRAG demo -> http://127.0.0.1:8800"
+echo "  logs: docker logs -f graphrag-demo"

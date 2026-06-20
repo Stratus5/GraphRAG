@@ -145,13 +145,27 @@ Key design points:
 
 ### 5.1 The chunk → entity linkage (critical correctness detail)
 
-`write_graph_documents` (via `langchain-neo4j`) creates entities and attaches them to its
-**own** source `:Document` nodes keyed by `id` (our `chunk_id`). Separately, `write_chunks`
-creates our `:Chunk` nodes. Without an explicit join, the embedded chunks and the extracted
-entities live in **disjoint subgraphs** — vector search finds chunks, but graph expansion
-finds nothing, silently degrading answers to plain RAG.
+**Primary path (tenant/service + CLI):** `write_graph_tenant()` in `writer.py` writes
+entities, relationships, and `:Chunk-[:MENTIONS]->:__Entity__` edges in a single call,
+all keyed by `(tenant, id)`. There is no separate join step — chunks and entities land
+in the same tenant-scoped subgraph atomically:
 
-`link_chunks_to_entities()` repairs this by matching on the shared key and adding the edge:
+```cypher
+UNWIND $mentions AS m
+MATCH (c:Chunk {tenant: $tenant, chunk_id: m.chunk_id})
+MATCH (e:__Entity__ {tenant: $tenant, id: m.entity_id})
+MERGE (c)-[:MENTIONS]->(e)
+```
+
+**Eval/debug path only (langchain `add_graph_documents`):** `write_graph_documents()`
+(via `langchain-neo4j`) creates entities attached to its **own** source `:Document` nodes
+keyed by `id` (our `chunk_id`). Separately, `write_chunks` creates our `:Chunk` nodes.
+Without an explicit join, the embedded chunks and the extracted entities live in
+**disjoint subgraphs** — vector search finds chunks, but graph expansion finds nothing,
+silently degrading answers to plain RAG.
+
+`link_chunks_to_entities()` repairs this for the eval/debug path by matching on the
+shared key and adding the edge:
 
 ```cypher
 MATCH (src:Document)-[:MENTIONS]->(e)
@@ -160,7 +174,8 @@ MATCH (c:Chunk {chunk_id: src.id})
 MERGE (c)-[:MENTIONS]->(e)
 ```
 
-This step is what makes hybrid retrieval actually hybrid — keep it in the pipeline.
+This join is only needed on the eval/debug (frozen replay) path — the production
+`write_graph_tenant` path creates the `:MENTIONS` edges directly and does not require it.
 
 ---
 

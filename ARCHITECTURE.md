@@ -22,7 +22,7 @@ Design goals:
 - **Config-driven** — providers, chunking, and the extraction schema are all set in `config.yaml`; no code changes to retarget a domain.
 - **Provider-agnostic** — LLM/embeddings SDK imports are isolated behind a factory.
 - **Resilient** — per-file and per-chunk failure isolation, retries with backoff, idempotent writes.
-- **Simple stack** — Neo4j serves as both graph store and vector index; no separate vector DB.
+- **Split store** — Neo4j is the graph store (entities + relationships + chunk anchors); Weaviate is the vector index. The service path is graph-only; vector search is a separate `graphrag/vectorstore.py` capability used by the CLI, demo, and eval but never by the mTLS service.
 
 ---
 
@@ -32,7 +32,8 @@ Design goals:
 |-------|--------|-----|
 | Language | Python ≥ 3.11 | LangChain ecosystem |
 | Orchestration | LangChain 0.3.x (+ community, experimental) | Unified LLM/embeddings abstractions, `LLMGraphTransformer` |
-| Graph + vector store | Neo4j ≥ 5.20 (`langchain-neo4j`) | Native vector index + Cypher traversal in one engine |
+| Graph store | Neo4j ≥ 5.20 (`langchain-neo4j`) | Cypher traversal; entities, relationships, chunk anchors — no embeddings stored here |
+| Vector store | Weaviate ≥ 1.x (`weaviate-client>=4`) | Tenant-scoped dense vector search (CLI/demo/eval path only) |
 | LLM / embeddings | OpenAI (pluggable) | Default provider; isolated behind `providers.py` |
 | CLI | Typer | Decorator-based commands, auto `--help` |
 | Config | YAML + `.env` (dotenv) | Human-readable, secrets out of source |
@@ -48,17 +49,21 @@ graphrag/
 ├── cli.py                  # Typer entry point: `ingest`, `query`
 ├── config.py               # Typed config dataclasses + load_config()
 ├── providers.py            # get_chat_model() / get_embeddings() factories
+├── vectorstore.py          # Weaviate vector search — CLI/demo/eval only; NEVER imported by service path
+├── api.py                  # FastAPI service (mTLS-gated, tenant-scoped, graph-only)
+├── mcp_server.py           # MCP tool surface over the same service functions as api.py
 ├── ingestion/
 │   ├── loaders.py          # load_folder(): .txt/.md/.pdf → [Document]
 │   ├── chunker.py          # chunk_documents(): split + stable SHA1 IDs
 │   ├── extractor.py        # build_transformer() / extract_graph(): text → triples
-│   ├── writer.py           # Neo4j persistence + vector index + chunk↔entity linking
-│   └── pipeline.py         # ingest(): orchestrates the 7 stages
+│   ├── writer.py           # Neo4j persistence (graph + chunk anchors; no embeddings stored)
+│   └── pipeline.py         # ingest() (CLI/eval, builds graph + Weaviate index); ingest_chunks() (service, graph only)
 └── retrieval/
-    ├── vector.py           # search(): Neo4j vector index query
     ├── expander.py         # build_expansion_query() / expand(): N-hop traversal
     ├── qa.py               # build_context() / answer(): prompt + LLM
-    └── pipeline.py         # query(): orchestrates search → expand → answer
+    ├── rerank.py           # cross-encoder rerank (optional BGE)
+    ├── service.py          # retrieve(): graph-only service retrieve (no vector layer)
+    └── pipeline.py         # query(): CLI/eval orchestration (Weaviate search → expand → answer)
 ```
 
 Separation of concerns is strict: each module does one stage, and the two `pipeline.py`
@@ -105,8 +110,8 @@ dataclasses (`Config`, `ProviderConfig`, `ChunkingConfig`, `SchemaConfig`, `Neo4
 
 ## 5. Ingestion Pipeline
 
-`ingest(cfg, folder, on_progress)` runs seven stages, reporting progress via a callback
-`(stage: str, current: int, total: int)` so the CLI can render a Rich progress bar.
+`ingest(cfg, folder, on_progress)` (CLI/eval path) runs these stages, reporting progress via a
+callback `(stage: str, current: int, total: int)` so the CLI can render a Rich progress bar.
 
 ```
 folder/                      graphrag ingest <folder>
@@ -116,13 +121,16 @@ folder/                      graphrag ingest <folder>
   ▼ 3. extractor.build_transformer()   schema-aware LLMGraphTransformer
   ▼ 4. extractor.extract_graph()       per-chunk LLM extraction     [GraphDocument]
   │        (retry w/ backoff, failures isolated + counted)
-  ▼ 5. writer.write_chunks()           embed text, MERGE :Chunk, CREATE vector index
-  ▼ 6. writer.write_graph_documents()  MERGE entities + relationships (baseEntityLabel,
-  │                                     include_source=True)
-  ▼ 7. writer.link_chunks_to_entities()  connect :Chunk →[:MENTIONS]→ entities
+  ▼ 5. writer.write_chunks()           MERGE :Chunk (text + chunk_id; no embedding stored)
+  ▼ 6. writer.write_graph_tenant()     MERGE entities + relationships, :Chunk→[:MENTIONS]→entity
+  │                                     (tenant-scoped; replaces langchain add_graph_documents)
+  ▼ 7. vectorstore.build_index()       embed chunks, upsert into Weaviate "Chunk" collection
   │
   ▼ returns {documents, chunks, graph_documents, extraction_failures}
 ```
+
+The service-path equivalent (`ingest_chunks`) runs only stages 4–6 (no loaders, no chunker,
+no Weaviate write — the platform is the chunk authority and owns its own vector index).
 
 Key design points:
 
@@ -159,9 +167,9 @@ This step is what makes hybrid retrieval actually hybrid — keep it in the pipe
 ## 6. Graph Schema
 
 ```
-(:Document {source})
-   └─[:HAS_CHUNK]──▶ (:Chunk {chunk_id, text, embedding})
-                        └─[:MENTIONS]──▶ (:__Entity__ {id, …})
+(:Document {source, tenant})
+   └─[:HAS_CHUNK]──▶ (:Chunk {chunk_id, text, tenant})
+                        └─[:MENTIONS]──▶ (:__Entity__ {id, tenant, …})
                                             ├─[:FOUNDED]────▶ (:__Entity__)
                                             ├─[:ACQUIRED]───▶ (:__Entity__)
                                             ├─[:LOCATED_IN]─▶ (:__Entity__)
@@ -170,20 +178,24 @@ This step is what makes hybrid retrieval actually hybrid — keep it in the pipe
 
 | Node | Labels | Key properties | Role |
 |------|--------|----------------|------|
-| Document | `:Document` | `source` | Provenance root (file path) |
-| Chunk | `:Chunk` | `chunk_id`, `text`, `embedding` | Vector-searchable text unit |
-| Entity | `:__Entity__` + domain label | `id`, LLM-derived props | Graph node; `__Entity__` base label enables uniform queries |
+| Document | `:Document` | `source`, `tenant` | Provenance root (file path), tenant-scoped |
+| Chunk | `:Chunk` | `chunk_id`, `text`, `tenant` | Graph anchor; **no embedding stored** — vectors live in Weaviate |
+| Entity | `:__Entity__` + domain label | `id`, `tenant`, LLM-derived props | Graph node; composite `(tenant, id)` key enforces isolation |
 
-Vector index:
+**No vector index in Neo4j.** Embeddings are stored in Weaviate (collection `Chunk`, property
+`tenant` used as a filter). The CLI/demo/eval path calls `vectorstore.search()` against
+Weaviate; the service path (`api.py` / `mcp_server.py`) never touches the vector layer —
+it receives `chunk_ids` from the platform and expands the graph from them.
+
+Composite uniqueness constraints (enforced in Neo4j):
 
 ```cypher
-CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS
-FOR (c:Chunk) ON (c.embedding)
-OPTIONS {indexConfig: {`vector.dimensions`: $dims,
-                       `vector.similarity_function`: 'cosine'}}
-```
+CREATE CONSTRAINT chunk_tenant_key IF NOT EXISTS
+FOR (c:Chunk) REQUIRE (c.tenant, c.chunk_id) IS UNIQUE;
 
-Dimensions follow the embedding model (1536 for `text-embedding-3-small`); similarity is cosine.
+CREATE CONSTRAINT entity_tenant_key IF NOT EXISTS
+FOR (e:__Entity__) REQUIRE (e.tenant, e.id) IS UNIQUE;
+```
 
 ### 6.1 Generic vs. Domain schema
 
@@ -201,13 +213,13 @@ See `docs/domain-schema-walkthrough.md` for the reset-and-re-ingest workflow.
 
 ## 7. Retrieval Pipeline
 
-`query(cfg, question, k=4, hops=1)`:
+`query(cfg, question, k=4, hops=1)` (CLI/eval path):
 
 ```
 "Who founded Acme Corp?"          graphrag query "<question>" [--k 4] [--hops 1]
   │
   ▼ embed question                 providers.get_embeddings()
-  ▼ vector.search(k)               db.index.vector.queryNodes('chunk_embedding', k, emb)
+  ▼ vectorstore.search(k)          Weaviate near-vector query, tenant-filtered
   │      → top-k chunks {chunk_id, text, source, score}
   ▼ expander.expand(chunk_ids, hops)
   │      (:Chunk)-[:MENTIONS]->(e)-[r*1..hops]-(neighbor)  → facts {subject, predicate, object}  (LIMIT 100)
@@ -218,6 +230,9 @@ See `docs/domain-schema-walkthrough.md` for the reset-and-re-ingest workflow.
   │
   ▼ grounded answer with source citations
 ```
+
+The service-path retrieve (`service.retrieve`) starts at step 3 — the platform supplies
+`chunk_ids` directly and the service never calls the vector layer.
 
 - **Hybrid retrieval** — dense (chunk vectors) + structured (entity neighborhood) context.
 - **Configurable hops** — `--hops 0` is chunks-only; `1` adds direct neighbors; `2` adds
@@ -266,8 +281,12 @@ graphrag query "Who founded Acme Corp?"
 
 | Service | Purpose | Endpoint / Access |
 |---------|---------|-------------------|
-| Neo4j | Graph store + vector index | `bolt://localhost:7687`, browser at `:7474` (run via `./scripts/neo4j-up.sh` / Podman) |
-| OpenAI | LLM + embeddings | API key via `.env` (`OPENAI_API_KEY`) |
+| Neo4j | Graph store (entities, relationships, chunk anchors — **no embeddings**) | `bolt://localhost:7687`, browser at `:7474` |
+| Weaviate | Vector index (CLI/demo/eval path only) | HTTP `localhost:8080`, gRPC `localhost:50051` |
+| OpenAI | LLM + embeddings | API key via `.env` (`OPENAI_API_KEY`); `OPENAI_BASE_URL` for gateway |
+
+Both Neo4j and Weaviate start via `docker compose up -d` (or `podman compose up -d`). The
+`./scripts/neo4j-up.sh` fallback starts Neo4j only.
 
 ---
 
@@ -285,7 +304,22 @@ pytest -v                         # unit
 
 ---
 
-## 12. Extension Points
+## 12. Service / Vector Boundary Invariant
+
+The service path (`service.py`, `api.py`, `mcp_server.py`) is **graph-only**. It must never
+import `weaviate` or `graphrag.vectorstore`. This is enforced by a static source check in
+`tests/test_boundary.py`:
+
+- **Why**: in production the platform owns vectors (Weaviate or equivalent); the graph service
+  receives `chunk_ids` and expands from them. Importing the vector layer in the service would
+  couple it to a Weaviate deployment that doesn't exist there.
+- **CLI/demo/eval**: `graphrag/vectorstore.py` is the vector capability for local use. The CLI
+  `ingest` builds both the Neo4j graph and the Weaviate index; `graphrag query` runs Weaviate
+  vector search → graph expansion. The demo's Live mode does the same via `demos/server.py`.
+
+---
+
+## 13. Extension Points
 
 All fit within current interfaces — no breaking changes required:
 
@@ -293,5 +327,4 @@ All fit within current interfaces — no breaking changes required:
 2. **Entity deduplication** — merge `Acme Corp` / `Acme` into one node post-ingest.
 3. **Typed relationship constraints** — `(Person, FOUNDED, Company)` triples vs. flat strings.
 4. **Async / parallel extraction** — fan out per-chunk LLM calls.
-5. **HTTP API** — FastAPI wrapper over `ingest` / `query`.
-6. **Community detection** — cluster entities and summarize per community (GraphRAG-style).
+5. **Community detection** — cluster entities and summarize per community (GraphRAG-style).

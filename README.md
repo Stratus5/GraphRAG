@@ -51,17 +51,35 @@ alone — i.e. no worse than ordinary vector RAG.
 
 ## Quickstart
 1. `cp .env.example .env` and fill in secrets.
-2. Start Neo4j:
-   - `podman compose up -d` (or `docker compose up -d`), **or**
-   - `./scripts/neo4j-up.sh` — plain-podman fallback when `podman compose` is
+2. Start Neo4j + Weaviate:
+   - `docker compose up -d` (or `podman compose up -d`) — starts both stores, **or**
+   - `./scripts/neo4j-up.sh` — plain-podman fallback (Neo4j only) when `podman compose` is
      unavailable (e.g. broken nested podman inside a toolbox). Stop with
      `./scripts/neo4j-down.sh`.
-3. `pip install -e ".[openai,dev]"`
-4. `graphrag ingest sample_data/`
-5. `graphrag query "Who founded the company?"`
+3. `pip install -e ".[openai,vector,dev]"`  (`vector` installs `weaviate-client>=4`)
+4. `graphrag ingest sample_data/` — builds the Neo4j knowledge graph **and** the Weaviate
+   vector index.
+5. `graphrag query "Who founded the company?"` — Weaviate vector search → graph expansion →
+   grounded answer.
 
-Neo4j runs the same container either way; `docker-compose.yml` and the scripts
-are equivalent. Browser at http://localhost:7474, bolt at `bolt://localhost:7687`.
+Both stores bind to loopback. Neo4j: browser at http://localhost:7474, bolt at
+`bolt://localhost:7687`. Weaviate: HTTP at http://localhost:8080.
+
+## Demo
+
+```bash
+./demos/start.sh
+```
+
+Opens the demo SPA at **http://127.0.0.1:8800**. Two modes:
+
+- **Curated** — answers driven by hand-authored, precision graph queries; no gateway key
+  needed. Works offline.
+- **Live** — real Weaviate vector search → graph expansion → LLM answer. Requires
+  `OPENAI_BASE_URL` and `OPENAI_API_KEY` in `.env`.
+
+The toggle in the UI switches between modes. "Live" will show as unavailable if the gateway
+key is missing or Weaviate is empty.
 
 ## Tests
 - Unit tests (no external services): `.venv/bin/python -m pytest -v`

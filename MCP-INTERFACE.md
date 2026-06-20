@@ -89,9 +89,22 @@ Confirm Neo4j is reachable. Returns `{status: "ok"}`.
 
 ## Relationship to the REST API
 
-Both surfaces wrap the same functions (`retrieve`, `ingest_chunks`,
-`delete_source`) over the same pooled driver, with identical tenant scoping. The
-difference is the trust model: REST enforces mTLS + a client-CN allow-list and
-derives nothing about the tenant from the caller, while MCP relies on the
-transport for auth and takes the tenant as an explicit argument. Use REST for the
-platform; use MCP for local tooling and general-purpose clients.
+`api.py` (REST) and `mcp_server.py` (MCP) are **siblings** — independent wrappers over the
+same service functions (`retrieve`, `ingest_chunks`, `delete_source`) and the same pooled
+Neo4j driver, with identical tenant scoping. Neither is derived from the other.
+
+MCP tools are **not** auto-derived from the FastAPI app. The reason is that the trust models
+are fundamentally different:
+
+- **REST** is fronted by an external nginx that terminates mTLS and injects the verified
+  client CN as an HTTP header. The FastAPI app reads that header but never handles TLS itself.
+  This header-trust pattern does not transfer to MCP transports (stdio, SSE, etc.), which have
+  no equivalent injection point.
+- **MCP** takes `tenant` as an explicit tool argument and relies entirely on the transport
+  layer for authentication (the caller controls the stdio process or the HTTP transport). An
+  auto-generated MCP surface from FastAPI route introspection would silently drop the
+  mTLS/CN semantics and produce a security boundary mismatch.
+
+The difference is the trust model: REST enforces mTLS + a client-CN allow-list (deploy-only,
+external nginx); MCP relies on its transport for auth and takes the tenant as an explicit
+argument. Use REST for the platform; use MCP for local tooling and general-purpose clients.

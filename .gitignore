@@ -10,3 +10,5 @@ dist/
 sample_data/
 .worktrees/
 .superpowers/
+skills/
+.idea/

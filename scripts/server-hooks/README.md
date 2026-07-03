@@ -6,44 +6,48 @@ both remotes. The two hosts need different mechanisms:
 
 | Host | In-house docs allowed anywhere? | Mechanism |
 |------|--------------------------------|-----------|
-| github.com (`Stratus5/GraphRAG`) | No — never, on any branch | Push ruleset (repo-wide path restriction) + CI check |
+| github.com (`Stratus5/GraphRAG`) | No — never, on any branch | Branch protection (required CI check) — see note below |
 | code.stratus5.com (`oss/graphrag`) | Yes, on `internal` only | Branch-aware `pre-receive` server hook |
+
+> **Public-repo limitation:** GitHub does **not** allow push rulesets
+> (file-path restrictions) on *public* repos — the API returns
+> `422 "Source public repos cannot have push rules"`. So a direct push of
+> docs cannot be server-rejected here. The guards that DO work on a public
+> repo are branch protection (gates PR merges) + the CI check + the local
+> pre-push hook. See section 1.
 
 ---
 
-## 1. GitHub — push ruleset (preventive, rejects the push)
+## 1. GitHub — branch protection (applied)
 
-A repo-wide "restrict file paths" push rule. Since GitHub has no `internal`
-branch, blocking `docs/**` and `CLAUDE.md` everywhere is exactly right.
+Push rulesets are unavailable on this public repo (see note above), so `main`
+is protected with classic branch protection instead. This is **already
+applied**; recorded here so it can be recreated. It requires the CI check to
+merge, blocks force-push/deletion, and leaves `enforce_admins` off so the
+maintainer keeps direct `git push origin main`.
 
-### Web UI
-Repo → **Settings → Rules → Rulesets → New ruleset → New push ruleset**
-- Enforcement: **Active**
-- Add rule: **Restrict file paths** → add `docs/**` and `CLAUDE.md`
-- Save.
-
-### API (needs a token with repo *Administration: write*)
+### API (needs a PAT with `repo` admin)
 ```bash
 export GITHUB_TOKEN=...   # PAT with admin on Stratus5/GraphRAG
-curl -sS -X POST \
+curl -sS -X PUT \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
   -H "Accept: application/vnd.github+json" \
-  https://api.github.com/repos/Stratus5/GraphRAG/rulesets \
+  https://api.github.com/repos/Stratus5/GraphRAG/branches/main/protection \
   -d '{
-    "name": "no-inhouse-docs",
-    "target": "push",
-    "enforcement": "active",
-    "rules": [
-      { "type": "file_path_restriction",
-        "parameters": { "restricted_file_paths": ["docs/**", "CLAUDE.md"] } }
-    ]
+    "required_status_checks": { "strict": false, "contexts": ["no-inhouse-docs"] },
+    "enforce_admins": false,
+    "required_pull_request_reviews": null,
+    "restrictions": null,
+    "allow_force_pushes": false,
+    "allow_deletions": false
   }'
 ```
-With the GitHub CLI once installed: `gh api --method POST repos/Stratus5/GraphRAG/rulesets --input ruleset.json`.
 
-> Note: push rulesets with file-path restrictions are available for public
-> repos and for org repos on Team/Enterprise. If your plan hides the option,
-> rely on the CI check below plus branch protection.
+### Web UI equivalent
+Repo → **Settings → Branches → Add branch protection rule** for `main`:
+- **Require status checks to pass** → select **no-inhouse-docs**
+- Leave "Do not allow bypassing" **off** (so the maintainer can still push directly)
+- Force pushes / deletions: not allowed.
 
 ## 2. GitHub — CI check (detective, already in the repo)
 

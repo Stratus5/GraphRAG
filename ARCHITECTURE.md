@@ -88,6 +88,11 @@ chunking:
 schema:
   allowed_nodes: []          # empty = auto-derive; e.g. [Person, Company]
   allowed_relationships: []  # empty = auto-derive; e.g. [FOUNDED, ACQUIRED]
+expander:
+  max_degree: 50             # skip expansion through hub entities above this degree
+  candidate_limit: 500       # deterministic fact budget from the expander (Cypher LIMIT)
+  top_n: 10                  # facts kept after rerank
+  rerank_model: BAAI/bge-reranker-base
 ```
 
 `.env` (secrets, **not** committed):
@@ -100,7 +105,8 @@ NEO4J_PASSWORD=password123
 ```
 
 `config.py` loads the YAML and overlays `NEO4J_*` from the environment into typed
-dataclasses (`Config`, `ProviderConfig`, `ChunkingConfig`, `SchemaConfig`, `Neo4jConfig`).
+dataclasses (`Config`, `ProviderConfig`, `ChunkingConfig`, `SchemaConfig`,
+`ExpanderConfig`, `Neo4jConfig`). Model names may carry an `fc:openai/…` gateway prefix.
 
 > **Note:** the OpenAI key must be present in the environment when the LangChain OpenAI
 > clients are constructed — exporting it after import does not help. Use `.env` / a real
@@ -237,7 +243,9 @@ See `docs/domain-schema-walkthrough.md` for the reset-and-re-ingest workflow.
   ▼ vectorstore.search(k)          Weaviate near-vector query, tenant-filtered
   │      → top-k chunks {chunk_id, text, source, score}
   ▼ expander.expand(chunk_ids, hops)
-  │      (:Chunk)-[:MENTIONS]->(e)-[r*1..hops]-(neighbor)  → facts {subject, predicate, object}  (LIMIT 100)
+  │      (:Chunk)-[:MENTIONS]->(e)-[r*1..hops]-(neighbor:__Entity__)  → facts {subject, predicate, object}
+  │      (tenant-scoped path guard; skips hub entities over max_degree; deterministic order; Cypher LIMIT candidate_limit)
+  ▼ rerank.rerank_facts(question, facts, top_n)   optional BGE cross-encoder; fails closed to expander order → top_n
   ▼ qa.build_context(chunks, facts)
   │      ## Passages  [source] text …
   │      ## Known facts  - subject PREDICATE object …
@@ -247,11 +255,19 @@ See `docs/domain-schema-walkthrough.md` for the reset-and-re-ingest workflow.
 ```
 
 The service-path retrieve (`service.retrieve`) starts at step 3 — the platform supplies
-`chunk_ids` directly and the service never calls the vector layer.
+`chunk_ids` directly and the service never calls the vector layer. It applies the same
+`expand → rerank → top_n` steps and returns the facts (no `build_context`/`answer`).
 
 - **Hybrid retrieval** — dense (chunk vectors) + structured (entity neighborhood) context.
 - **Configurable hops** — `--hops 0` is chunks-only; `1` adds direct neighbors; `2` adds
-  friends-of-friends. Variable-length Cypher with `LIMIT 100` prevents runaway expansion.
+  friends-of-friends. Variable-length Cypher bounded by `candidate_limit` (default 500)
+  prevents runaway expansion, and `max_degree` (default 50) skips traversal through hub
+  entities. Every path node must be a tenant `:__Entity__`, so traversal never crosses
+  tenants or drifts onto id-less nodes.
+- **Reranking (optional, fails closed)** — when a `question` is supplied and the `rerank`
+  extra + model are present, a local BGE cross-encoder reorders facts and truncates to
+  `top_n`; if the package/model is absent or scoring errors, it falls back to the
+  expander's deterministic order rather than failing the request.
 - **Graceful degradation** — if expansion yields no facts, the answer still comes from chunks.
 - **Grounding** — the system prompt instructs the model to answer strictly from context,
   cite source files, and say "I don't know" when the answer is absent.
@@ -288,6 +304,8 @@ graphrag query "Who founded Acme Corp?"
 | Transient API errors | Tenacity retry, exponential backoff (≤3) | `extractor.py` |
 | Duplicate writes | `MERGE` everywhere + stable IDs → idempotent | `chunker.py`, `writer.py` |
 | Disjoint subgraphs | Explicit chunk↔entity linking step | `writer.py` |
+| Rerank extra/model absent | Fail closed to deterministic expander order | `retrieval/rerank.py`, `service.py` |
+| Runaway graph expansion | `candidate_limit` budget + `max_degree` hub skip | `retrieval/expander.py` |
 | Missing facts at query | Fall back to chunk-only context | `retrieval/pipeline.py` |
 
 ---

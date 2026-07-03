@@ -1,0 +1,28 @@
+name: guard-inhouse-docs
+
+# Detective control on GitHub: fails if in-house docs (docs/ or CLAUDE.md)
+# ever appear on a tracked branch. This runs AFTER a push, so pair it with a
+# push ruleset (see scripts/server-hooks/README.md) for true prevention, and
+# with branch protection requiring this check so PRs carrying docs can't merge.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  no-inhouse-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure docs/ and CLAUDE.md are not tracked
+        run: |
+          hits="$(git ls-files -- docs CLAUDE.md)"
+          if [ -n "$hits" ]; then
+            echo "::error::In-house files must never live on a GitHub branch:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "clean: no in-house docs tracked"

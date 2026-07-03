@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+#
+# GitLab server-side pre-receive hook for code.stratus5.com.
+#
+# Branch-aware guard: REJECTS any push to `main` whose tip tracks docs/ or
+# CLAUDE.md. The `internal` branch is intentionally NOT checked -- it is the
+# sanctioned home for those in-house files on code.stratus5.com.
+#
+# Runs in the bare repo on the GitLab/Gitaly server. See README.md in this
+# directory for installation (global custom_hooks_dir or per-project).
+#
+set -euo pipefail
+
+zero="0000000000000000000000000000000000000000"
+PROTECTED_PATHS=(docs CLAUDE.md)
+status=0
+
+while read -r oldrev newrev refname; do
+  # Only guard the main branch; internal (and everything else) may hold docs.
+  [ "$refname" = "refs/heads/main" ] || continue
+  # Skip branch deletion.
+  [ "$newrev" = "$zero" ] && continue
+
+  hits="$(git ls-tree -r --name-only "$newrev" -- "${PROTECTED_PATHS[@]}" 2>/dev/null || true)"
+  if [ -n "$hits" ]; then
+    echo "" >&2
+    echo "GL-REJECT: 'main' must not contain in-house files. Offending paths:" >&2
+    echo "$hits" | sed 's/^/    /' >&2
+    echo "These belong on the 'internal' branch only. Do not merge internal -> main." >&2
+    echo "" >&2
+    status=1
+  fi
+done
+
+exit $status

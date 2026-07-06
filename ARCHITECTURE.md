@@ -12,7 +12,7 @@ chunks combined with structured graph expansion over extracted entities.
 GraphRAG turns a folder of documents into a queryable knowledge graph and answers
 natural-language questions grounded in that graph, with source citations.
 
-> **Live demo:** a hosted instance runs at **[graphrag.stratus5.net](https://graphrag.stratus5.net)** —
+> **Live demo:** a hosted instance runs at <a href="https://graphrag.stratus5.net" target="_blank" rel="noopener noreferrer"><strong>graphrag.stratus5.net</strong></a> —
 > the Read/Ask/Explore SPA with both Curated (precise graph queries) and Live (the real
 > vector → expand → rerank pipeline) modes. See `demos/` and README for running it locally.
 

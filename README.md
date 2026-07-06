@@ -1,6 +1,6 @@
 # GraphRAG (LangChain + Neo4j)
 
-Local GraphRAG demo. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design.
+Local GraphRAG demo. See <a href="ARCHITECTURE.md" target="_blank" rel="noopener noreferrer"><code>ARCHITECTURE.md</code></a> for the full design.
 
 ## Objective
 
@@ -66,7 +66,7 @@ Both stores bind to loopback. Neo4j: browser at http://localhost:7474, bolt at
 
 ## Demo
 
-**Try it now — no setup:** **[graphrag.stratus5.net](https://graphrag.stratus5.net)** — a hosted
+**Try it now — no setup:** <a href="https://graphrag.stratus5.net" target="_blank" rel="noopener noreferrer"><strong>graphrag.stratus5.net</strong></a> — a hosted
 instance you can experience and play with straight in the browser.
 
 To run it locally:

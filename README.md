@@ -1,7 +1,6 @@
 # GraphRAG (LangChain + Neo4j)
 
-Local GraphRAG demo. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design,
-or `docs/superpowers/specs/` for the original specs.
+Local GraphRAG demo. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design.
 
 ## Objective
 
@@ -67,16 +66,26 @@ Both stores bind to loopback. Neo4j: browser at http://localhost:7474, bolt at
 
 ## Demo
 
+**Try it now — no setup:** **[graphrag.stratus5.net](https://graphrag.stratus5.net)** — a hosted
+instance you can experience and play with straight in the browser.
+
+To run it locally:
+
 ```bash
 ./demos/start.sh
 ```
 
-Opens the demo SPA at **http://127.0.0.1:8800**. Two modes:
+Opens the demo SPA at **http://127.0.0.1:8800**. Three tabs: **Read** (watch each document get
+parsed into entities + relationships and drawn onto the map), **Ask** (pick a question and watch
+the answering facts light up across the graph, answer entities in yellow), and **Explore** (click
+any entity to re-centre the graph on it). The Ask tab has two answer modes:
 
 - **Curated** — answers driven by hand-authored, precision graph queries; no gateway key
   needed. Works offline.
-- **Live** — real Weaviate vector search → graph expansion → LLM answer. Requires
-  `OPENAI_BASE_URL` and `OPENAI_API_KEY` in `.env`.
+- **Live** — the real retrieval pipeline: Weaviate vector search → N-hop graph expansion →
+  cross-encoder reranking. The answer subgraph is highlighted, and facts recovered by graph
+  expansion beyond the vector hits are labelled **graph-only** — the whole point of GraphRAG,
+  made visible. Requires `OPENAI_BASE_URL` and `OPENAI_API_KEY` in `.env`.
 
 The toggle in the UI switches between modes. "Live" will show as unavailable if the gateway
 key is missing or Weaviate is empty.

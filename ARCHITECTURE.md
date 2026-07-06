@@ -12,6 +12,10 @@ chunks combined with structured graph expansion over extracted entities.
 GraphRAG turns a folder of documents into a queryable knowledge graph and answers
 natural-language questions grounded in that graph, with source citations.
 
+> **Live demo:** a hosted instance runs at **[graphrag.stratus5.net](https://graphrag.stratus5.net)** —
+> the Read/Ask/Explore SPA with both Curated (precise graph queries) and Live (the real
+> vector → expand → rerank pipeline) modes. See `demos/` and README for running it locally.
+
 Two flows:
 
 - **Ingestion** — `load → chunk → extract (LLM) → embed → write to Neo4j → link chunks to entities`
@@ -321,6 +325,13 @@ graphrag query "Who founded Acme Corp?"
 Both Neo4j and Weaviate start via `docker compose up -d` (or `podman compose up -d`). The
 `./scripts/neo4j-up.sh` fallback starts Neo4j only.
 
+**Gateway embeddings.** When `OPENAI_BASE_URL` points at the LLM gateway,
+`providers.get_embeddings` builds `OpenAIEmbeddings` with `check_embedding_ctx_length=False`
+so each `input` item is sent as a raw string. LangChain's default tiktoken-encodes text into
+integer token-ID arrays, which `api.openai.com` accepts but the gateway rejects with
+`400 invalid_input: Each 'input' array item must be a string`. The default (with client-side
+context-length splitting) is preserved when talking to `api.openai.com` directly.
+
 ---
 
 ## 11. Testing
@@ -348,7 +359,10 @@ import `weaviate` or `graphrag.vectorstore`. This is enforced by a static source
   couple it to a Weaviate deployment that doesn't exist there.
 - **CLI/demo/eval**: `graphrag/vectorstore.py` is the vector capability for local use. The CLI
   `ingest` builds both the Neo4j graph and the Weaviate index; `graphrag query` runs Weaviate
-  vector search → graph expansion. The demo's Live mode does the same via `demos/server.py`.
+  vector search → graph expansion. The demo's Live mode does the same via `demos/server.py`:
+  its image bakes in the `rerank` extra + BGE cross-encoder (CPU-only torch, model pre-pulled),
+  so Live reranks exactly like the production service, highlights the answer subgraph, and labels
+  facts recovered by expansion beyond the vector hits as **graph-only**.
 
 ---
 

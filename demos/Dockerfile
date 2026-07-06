@@ -5,6 +5,11 @@ COPY graphrag ./graphrag
 COPY demos ./demos
 COPY eval ./eval
 COPY config.yaml ./
+# Install CPU-only torch FIRST from PyTorch's CPU index. The rerank extra pulls
+# sentence-transformers -> torch, and the default PyPI torch wheel bundles ~2.7 GB of
+# CUDA runtime libs (nvidia-*). The demo reranker runs on CPU, so pre-satisfying torch
+# with the CPU wheel keeps the image small.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -e ".[openai,vector,rerank]" uvicorn[standard]
 # Pre-bake the BGE cross-encoder (matches config.yaml expander.rerank_model) so Live
 # reranking works with no HuggingFace egress at runtime and the first query isn't slow.

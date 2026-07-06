@@ -26,5 +26,15 @@ def get_embeddings(cfg: Config) -> Embeddings:
     if provider == "openai":
         from langchain_openai import OpenAIEmbeddings
 
-        return OpenAIEmbeddings(model=cfg.embeddings.model, base_url=_BASE_URL)
+        # The LLM gateway requires each `input` item to be a raw string. LangChain's
+        # default (check_embedding_ctx_length=True) tiktoken-encodes text into integer
+        # token-ID arrays, which api.openai.com accepts but the gateway rejects with
+        # `400 invalid_input: Each 'input' array item must be a string`. Disable it on
+        # the gateway path so strings are sent; keep the default (client-side
+        # context-length splitting) when talking to api.openai.com directly.
+        return OpenAIEmbeddings(
+            model=cfg.embeddings.model,
+            base_url=_BASE_URL,
+            check_embedding_ctx_length=_BASE_URL is None,
+        )
     raise ValueError(f"Unsupported embeddings provider: {provider}")

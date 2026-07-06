@@ -137,4 +137,16 @@ button.act:disabled { opacity: .4; cursor: default; box-shadow: none; }
 #mode-bar label { margin-right: 12px; }
 #live-note { color: #999; font-size: 12px; }
 .facts .graph-only { font-weight: 600; }
+.fact.graph-only { border-left: 2px solid var(--teal); }
+.fact .badge { margin-left: 8px; vertical-align: middle; }
 .badge { background: #2a7; color: #fff; border-radius: 4px; padding: 0 6px; font-size: 11px; }
+
+/* live-pipeline panel: section headers + vector-hit rows */
+.section-label { font-size: 11px; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--muted); margin: 16px 0 8px; }
+.hits { display: flex; flex-direction: column; gap: 6px; }
+.hit { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  font-size: 12.5px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 2px; padding: 8px 11px; }
+.hit .src { color: var(--text); }
+.hit .score { color: var(--amber-soft); font-size: 11px; }

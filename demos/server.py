@@ -30,6 +30,11 @@ if not graph.query("MATCH (e:__Entity__ {tenant: $t}) RETURN 1 AS x LIMIT 1", {"
 _Q = {q["id"]: q for q in scenario.QUESTIONS}
 
 LIVE_K = 2  # small k so aggregation/multi-hop questions can't be answered by vectors alone
+# Reranked top_n for the Live path. Headroom (> config's 10) so the whole answer relation
+# survives alongside the surrounding graph context, rather than the relation getting
+# half-truncated. The cross-encoder ranks the on-topic relation (e.g. INVESTED_IN for an
+# investor question) above incidental FOUNDED/CEO facts. Curated stays an exact query.
+LIVE_TOP_N = 15
 
 # Build the demo vector index once if the gateway is configured and it's empty.
 _LIVE_AVAILABLE = False
@@ -159,7 +164,7 @@ def _live(a_id: str) -> dict:
     facts = service_retrieve(graph, TENANT, chunk_ids, hops=2,
                              max_degree=cfg.expander.max_degree,
                              candidate_limit=cfg.expander.candidate_limit,
-                             question=q["question"], top_n=cfg.expander.top_n,
+                             question=q["question"], top_n=LIVE_TOP_N,
                              rerank_model=cfg.expander.rerank_model)
     return {"mode": "live", "question": q["question"], "vector_hits": hits,
             "facts": facts, "answer": q["answer"]}

@@ -232,7 +232,24 @@ function renderCurated(res) {
 
 function renderLive(data) {
   cy.elements().removeClass("hidden dim lit answer focus");
-  cy.elements().addClass("dim");
+  // Light the graph exactly like curated: the nodes + edges backing the returned
+  // facts light up, everything else is hidden, answer entities turn yellow, and the
+  // lit subgraph is re-laid-out radially. (service.retrieve returns predicate =
+  // type(r), so `subject|predicate|object` matches the /api/graph edge ids.)
+  let lit = cy.collection();
+  data.facts.forEach((f) => {
+    [`${f.subject}|${f.predicate}|${f.object}`, f.subject, f.object].forEach((i) => {
+      const e = cy.getElementById(i); if (!e.empty()) lit = lit.union(e);
+    });
+  });
+  lit.addClass("lit");
+  cy.elements().not(lit).addClass("hidden");
+  const answerTokens = (data.answer || []).map((a) => a.toLowerCase());
+  lit.nodes().forEach((n) => {
+    if (answerTokens.some((t) => n.id().toLowerCase().includes(t))) n.addClass("answer");
+  });
+  answerLayout(lit);
+
   const hitText = data.vector_hits.map(h => h.text.toLowerCase()).join(" ");
   const facts = data.facts.map(f => {
     // a fact is "graph-only" if neither endpoint's name appears in the retrieved chunks
@@ -241,16 +258,21 @@ function renderLive(data) {
     return { ...f, graphOnly: !inVectors };
   });
   const hitsHtml = data.vector_hits.length
-    ? data.vector_hits.map(h => `<li>${h.source} <em>(${h.score.toFixed(2)})</em></li>`).join("")
-    : "<li>(no chunks)</li>";
-  const factsHtml = facts.map(f =>
-    `<li class="${f.graphOnly ? "graph-only" : ""}">${f.subject} <b>${f.predicate}</b> ${f.object}` +
-    `${f.graphOnly ? ' <span class="badge">graph-only</span>' : ""}</li>`).join("");
+    ? data.vector_hits.map(h =>
+        `<div class="hit"><span class="src">${h.source}</span><span class="score">${h.score.toFixed(2)}</span></div>`).join("")
+    : `<div class="hit"><span class="src">(no chunks)</span></div>`;
+  // Same styled fact cards as curated; graph-only facts carry a badge + accent.
+  const factsHtml = facts.map((f, i) =>
+    `<div class="fact${f.graphOnly ? " graph-only" : ""}" style="animation-delay:${i * 45}ms">` +
+    `<span class="s">${f.subject}</span><span class="p">${f.predicate}</span><span class="o">${f.object}</span>` +
+    `${f.graphOnly ? '<span class="badge">graph-only</span>' : ""}</div>`).join("");
   $("#ro2").innerHTML = `<b>${data.vector_hits.length}</b> vector hits, <b>${facts.length}</b> graph facts`;
   $("#facts").innerHTML = "";
   document.getElementById("answer").innerHTML =
-    `<h4>Vector search returned (k=${data.vector_hits.length})</h4><ul>${hitsHtml}</ul>` +
-    `<h4>Facts after graph expansion</h4><ul class="facts">${factsHtml}</ul>`;
+    `<div class="section-label">Vector search returned (k=${data.vector_hits.length})</div>` +
+    `<div class="hits">${hitsHtml}</div>` +
+    `<div class="section-label">Facts after graph expansion</div>` +
+    `<div class="facts">${factsHtml}</div>`;
 }
 
 // ---- demo 3: Explore ---------------------------------------------------

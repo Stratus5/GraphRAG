@@ -34,6 +34,7 @@ const cy = cytoscape({
       "text-background-padding": 2, "text-background-shape": "roundrectangle",
     }},
     { selector: ".dim", style: { "opacity": 0.1 } },
+    { selector: ".faded", style: { "opacity": 0.2 } },
     { selector: ".hidden", style: { "display": "none" } },
     { selector: "edge.lit", style: {
       "line-color": "#ffb000", "target-arrow-color": "#ffb000", "width": 2.6,
@@ -59,6 +60,8 @@ const getFull = async () => (fullGraph ||= await load("/api/graph"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let currentMode = "curated";
+let focusNeighbours = false;   // Explore: dim nodes >1 hop from the focused node
+let focusedId = null;          // Explore: id the tree is currently rooted on
 document.querySelectorAll('input[name="mode"]').forEach(el =>
   el.addEventListener("change", e => { currentMode = e.target.value; }));
 
@@ -100,13 +103,12 @@ function answerLayout(eles) {
     concentric: (n) => n.degree(), levelWidth: () => 1, minNodeSpacing: 35 }).run();
   cy.zoom(1); cy.pan({ x: 0, y: 0 });
 }
-// Explore: re-root the whole graph on `id` (BFS rings to full depth), rebalanced.
+// Explore: re-root the whole graph on `id` as a top-down tree — `id` sits at the
+// top and everything branches downward (BFS to full depth). Fit-to-viewport so
+// wide, high-degree roots never run off the sides; the root stays near the top.
 function recenterOn(id, animate = true) {
-  const w = cy.width(), h = cy.height();
-  cy.layout({ name: "breadthfirst", animate, animationDuration: 600, fit: false, circle: true,
-    roots: [id], boundingBox: { x1: 60, y1: 50, w: w - 120, h: h - 110 },
-    spacingFactor: 1.0, padding: 20 }).run();
-  cy.zoom(1); cy.pan({ x: 0, y: 0 });
+  cy.layout({ name: "breadthfirst", animate, animationDuration: 600, fit: true,
+    roots: [id], spacingFactor: 1.0, padding: 30 }).run();
 }
 
 const tabs = { read: showRead, ask: showAsk, explore: showExplore };
@@ -290,13 +292,27 @@ async function showExplore() {
     <p class="copy">No search box. Click any entity and the whole graph rebalances
       around it, rings out to everything it connects to, however deep that goes.</p>
     ${legend()}
+    <label class="toggle"><input type="checkbox" id="focus-toggle"${focusNeighbours ? " checked" : ""}> Focus neighbours — dim everything past direct connections</label>
     <div class="readout" id="ro3">Centred on <b>${start}</b></div>`;
+  $("#focus-toggle").onchange = (e) => { focusNeighbours = e.target.checked; applyFocusDim(); };
+}
+
+// Fade everything more than one hop from the focused node, so the clicked node
+// and its direct connections stand out. No-op unless the "Focus neighbours"
+// toggle is on. Re-run on every focus change and whenever the toggle flips.
+function applyFocusDim() {
+  cy.elements().removeClass("faded");
+  if (!focusNeighbours || !focusedId) return;
+  const near = cy.getElementById(focusedId).closedNeighborhood();
+  cy.elements().not(near).addClass("faded");
 }
 
 function focusNode(id, animate = true) {
+  focusedId = id;
   cy.elements().removeClass("focus dim lit");
   cy.getElementById(id).addClass("focus");
   recenterOn(id, animate);
+  applyFocusDim();
   const ro = $("#ro3"); if (ro) ro.innerHTML = `Centred on <b>${id}</b>`;
 }
 

@@ -1,0 +1,38 @@
+# Build context is the repo root (docker-compose sets context: ..). The image only
+# needs pyproject.toml, graphrag/, demos/, eval/, and config.yaml — keep everything
+# else out so the context stays small and stray artifacts don't bust layer caching.
+
+# Virtualenvs / VCS (huge, never needed in the image)
+.venv/
+venv/
+.git/
+.github/
+.worktrees/
+
+# Python build & cache artifacts (these otherwise ride along in COPY graphrag and
+# invalidate the dependency layer on every rebuild)
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets & local env
+.env
+.env.example
+
+# Editor / tooling / assistant state
+.idea/
+.claude/
+.superpowers/
+.trivy-image.tar
+
+# Docs and data not used at build time
+*.md
+sample_data/
+tests/
+scripts/
+docker-compose.yml
